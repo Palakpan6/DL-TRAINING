@@ -212,27 +212,72 @@ if section == "Train Model":
                     z.extractall(temp_extract_dir)
 
                 data_root = find_dataset_root(temp_extract_dir)
-                classes_found = [d for d in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, d))]
+                train_dir = os.path.join(data_root, "train")
+                test_dir = os.path.join(data_root, "test")
+                train_classes = sorted(
+                    d for d in os.listdir(train_dir)
+                    if os.path.isdir(os.path.join(train_dir, d))
+                ) if os.path.isdir(train_dir) else []
+                test_classes = sorted(
+                    d for d in os.listdir(test_dir)
+                    if os.path.isdir(os.path.join(test_dir, d))
+                ) if os.path.isdir(test_dir) else []
+                has_train_test_split = bool(train_classes) and train_classes == test_classes
+                classes_found = train_classes if has_train_test_split else [
+                    d for d in os.listdir(data_root)
+                    if os.path.isdir(os.path.join(data_root, d))
+                ]
 
                 st.success(f"✅ Found **{len(classes_found)} classes**: `{', '.join(classes_found)}`")
 
-                datagen = ImageDataGenerator(rescale=1.0 / 255.0, validation_split=0.2)
-                train_gen = datagen.flow_from_directory(
-                    data_root,
-                    target_size=(img_size, img_size),
-                    batch_size=batch_size,
-                    class_mode='categorical',
-                    subset='training',
-                    shuffle=True
-                )
-                val_gen = datagen.flow_from_directory(
-                    data_root,
-                    target_size=(img_size, img_size),
-                    batch_size=batch_size,
-                    class_mode='categorical',
-                    subset='validation',
-                    shuffle=False
-                )
+                if has_train_test_split:
+                    st.info("Using 20% of `train/` for validation; the separate `test/` set is held out for final evaluation.")
+                    train_datagen = ImageDataGenerator(
+                        rescale=1.0 / 255.0,
+                        validation_split=0.2
+                    )
+                    test_datagen = ImageDataGenerator(rescale=1.0 / 255.0)
+                    train_gen = train_datagen.flow_from_directory(
+                        train_dir,
+                        target_size=(img_size, img_size),
+                        batch_size=batch_size,
+                        class_mode='categorical',
+                        subset='training',
+                        shuffle=True
+                    )
+                    val_gen = train_datagen.flow_from_directory(
+                        train_dir,
+                        target_size=(img_size, img_size),
+                        batch_size=batch_size,
+                        class_mode='categorical',
+                        subset='validation',
+                        shuffle=False
+                    )
+                    test_gen = test_datagen.flow_from_directory(
+                        test_dir,
+                        target_size=(img_size, img_size),
+                        batch_size=batch_size,
+                        class_mode='categorical',
+                        shuffle=False
+                    )
+                else:
+                    datagen = ImageDataGenerator(rescale=1.0 / 255.0, validation_split=0.2)
+                    train_gen = datagen.flow_from_directory(
+                        data_root,
+                        target_size=(img_size, img_size),
+                        batch_size=batch_size,
+                        class_mode='categorical',
+                        subset='training',
+                        shuffle=True
+                    )
+                    val_gen = datagen.flow_from_directory(
+                        data_root,
+                        target_size=(img_size, img_size),
+                        batch_size=batch_size,
+                        class_mode='categorical',
+                        subset='validation',
+                        shuffle=False
+                    )
 
                 st.write(f"📊 Total Training Images: **{train_gen.samples}**, Validation Images: **{val_gen.samples}**")
 
@@ -252,6 +297,9 @@ if section == "Train Model":
                             verbose=0
                         )
 
+                    if has_train_test_split:
+                        test_loss, test_accuracy = model.evaluate(test_gen, verbose=0)
+
                     st.session_state.model = model
                     st.session_state.img_size = img_size
                     # Map sorted indices to class names
@@ -260,6 +308,9 @@ if section == "Train Model":
                     st.session_state.train_history = history.history
 
                     st.success("🎉 Custom dataset training finished successfully!")
+                    if has_train_test_split:
+                        st.metric("Held-out Test Accuracy", f"{test_accuracy:.2%}")
+                        st.caption(f"Test loss: {test_loss:.4f} on {test_gen.samples} held-out images.")
 
             except Exception as e:
                 st.error(f"Error reading dataset ZIP: {e}")
